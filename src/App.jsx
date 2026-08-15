@@ -1,14 +1,16 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where 
+  getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query, where,
+  arrayUnion 
 } from 'firebase/firestore';
 import {
   getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged
 } from 'firebase/auth';
 import { 
   CheckCircle2, Circle, Calendar, Trash2, Plus, 
-  AlertCircle, Clock, LayoutList, X, Smartphone, Download, Loader2, LogOut, Lock, Mail
+  AlertCircle, Clock, LayoutList, X, Smartphone, Download, Loader2, LogOut, Lock, Mail,
+  Pencil // <-- Add this
 } from 'lucide-react';
 
 // ==========================================
@@ -34,12 +36,17 @@ export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [editingTaskId, setEditingTaskId] = useState(null);
 
   const [tasks, setTasks] = useState([]);
   const [tasksLoading, setTasksLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
+
+  const [updateText, setUpdateText] = useState({}); // Stores update text per task ID
+  const [deletingTaskId, setDeletingTaskId] = useState(null);
+
 
   const [newTask, setNewTask] = useState({ title: '', description: '', deadline: '' });
 
@@ -98,11 +105,41 @@ export default function App() {
     signOut(auth);
   };
 
-  const handleAddTask = async (e) => {
-    e.preventDefault();
-    if (!newTask.title.trim() || !user) return;
+  //const handleAddTask = async (e) => {
+    //e.preventDefault();
+    //if (!newTask.title.trim() || !user) return;
 
-    try {
+    //try {
+      //await addDoc(collection(db, 'tasks'), {
+        //userId: user.uid,
+        //title: newTask.title.trim(),
+        //description: newTask.description.trim(),
+        //deadline: newTask.deadline || null,
+        //completed: false,
+        //createdAt: new Date().toISOString()
+      //});
+      //setNewTask({ title: '', description: '', deadline: '' });
+      //setIsModalOpen(false);
+    //} catch (error) {
+      //console.error("Error adding task: ", error);
+    //}
+  //};
+
+  // Function that will add the edit task ability
+  const handleSaveTask = async (e) => {
+  e.preventDefault();
+  if (!newTask.title.trim() || !user) return;
+
+  try {
+    if (editingTaskId) {
+      // UPDATE EXISTING TASK
+      await updateDoc(doc(db, 'tasks', editingTaskId), {
+        title: newTask.title.trim(),
+        description: newTask.description.trim(),
+        deadline: newTask.deadline || null,
+      });
+    } else {
+      // ADD NEW TASK
       await addDoc(collection(db, 'tasks'), {
         userId: user.uid,
         title: newTask.title.trim(),
@@ -111,12 +148,51 @@ export default function App() {
         completed: false,
         createdAt: new Date().toISOString()
       });
-      setNewTask({ title: '', description: '', deadline: '' });
-      setIsModalOpen(false);
+    }
+
+    // Reset state & close modal
+    setNewTask({ title: '', description: '', deadline: '' });
+    setEditingTaskId(null);
+    setIsModalOpen(false);
+  } catch (error) {
+    console.error("Error saving task: ", error);
+  }
+};
+  
+    //Function to add update
+    const handleAddUpdate = async (taskId) => {
+    const text = updateText[taskId];
+    if (!text || !text.trim()) return;
+    
+    try {
+      await updateDoc(doc(db, 'tasks', taskId), {
+        updates: arrayUnion({
+          text: text.trim(),
+          createdAt: new Date().toISOString()
+        })
+      });
+    
+      // Clear input for this task
+      setUpdateText(prev => ({ ...prev, [taskId]: '' }));
     } catch (error) {
-      console.error("Error adding task: ", error);
+      console.error("Error adding update: ", error);
     }
   };
+  
+  
+    // Funtion to add the edit button to the task list and allow the user to edit the task title, description, and deadline
+      const handleStartEdit = (task) => {
+      setEditingTaskId(task.id);
+      setNewTask({
+        title: task.title,
+        description: task.description || '',
+        deadline: task.deadline || ''
+      });
+      setIsModalOpen(true);
+    };
+    
+
+
 
   const toggleTaskStatus = async (id, currentStatus) => {
     if (window.navigator.vibrate) window.navigator.vibrate(50);
@@ -127,14 +203,28 @@ export default function App() {
     }
   };
 
+  //const deleteTask = async (id) => {
+  //  if (window.navigator.vibrate) window.navigator.vibrate([50, 50, 50]);
+  //  try {
+  //    await deleteDoc(doc(db, 'tasks', id));
+  //  } catch (error) {
+  //    console.error("Error deleting task: ", error);
+  //  }
+  //};
+
+  //new delete task function that asks confirmation
   const deleteTask = async (id) => {
-    if (window.navigator.vibrate) window.navigator.vibrate([50, 50, 50]);
-    try {
-      await deleteDoc(doc(db, 'tasks', id));
-    } catch (error) {
-      console.error("Error deleting task: ", error);
-    }
-  };
+  // ADD THIS LINE AT THE TOP:
+  if (!window.confirm("Are you sure you want to delete this task?")) return;
+
+  if (window.navigator.vibrate) window.navigator.vibrate([50, 50, 50]);
+  try {
+    await deleteDoc(doc(db, 'tasks', id));
+  } catch (error) {
+    console.error("Error deleting task: ", error);
+  }
+};
+
 
   const getPriorityStatus = (deadline) => {
     if (!deadline) return { label: 'No Deadline', color: 'bg-slate-100 text-slate-700 border-slate-200' };
@@ -365,6 +455,46 @@ export default function App() {
                         {task.description}
                       </p>
                     )}
+
+                    {/* UPDATES SECTION */}
+                    <div className="mt-4 pt-3 border-t border-slate-100 space-y-2">
+                      <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Updates</h4>
+
+                      {/* List existing updates */}
+                      {task.updates && task.updates.length > 0 ? (
+                        <div className="space-y-1.5 mb-3">
+                          {task.updates.map((upd, idx) => (
+                            <div key={idx} className="bg-slate-50 p-2 rounded-lg text-xs text-slate-700 flex justify-between items-start">
+                              <span>{upd.text}</span>
+                              <span className="text-[10px] text-slate-400 ml-2 whitespace-nowrap">
+                                {formatDate(upd.createdAt)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">No updates added yet.</p>
+                      )}
+
+                      {/* Add new update input */}
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="Add a progress update..."
+                          value={updateText[task.id] || ''}
+                          onChange={(e) => setUpdateText({ ...updateText, [task.id]: e.target.value })}
+                          className="flex-1 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleAddUpdate(task.id)}
+                          className="px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 text-xs font-medium rounded-lg transition-colors"
+                        >
+                          Post
+                        </button>
+                      </div>
+                    </div>
+
                     
                     <div className="flex items-center justify-between mt-3">
                       {task.deadline ? (
@@ -374,10 +504,24 @@ export default function App() {
                         </div>
                       ) : <div />}
                       
+                      
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {/* EDIT BUTTON */}
+                      <button 
+                        onClick={() => handleStartEdit(task)} 
+                        className="text-slate-400 hover:text-indigo-600 transition-colors p-2 -m-2 rounded-full"
+                        title="Edit Task"
+                      >
+                        <Pencil className="h-4 w-4 sm:h-5 sm:w-5" />
+                      </button>
+
+                      {/* TRASH BUTTON */}
                       <button onClick={() => deleteTask(task.id)} className="text-slate-400 hover:text-red-500 transition-colors p-2 -m-2 rounded-full">
                         <Trash2 className="h-4 w-4 sm:h-5 sm:w-5" />
                       </button>
                     </div>
+
                   </div>
                 </div>
               );
@@ -392,6 +536,17 @@ export default function App() {
       >
         <Plus className="h-7 w-7 sm:h-8 sm:w-8" />
       </button>
+      <button
+        onClick={() => {
+          setEditingTaskId(null);
+          setNewTask({ title: '', description: '', deadline: '' });
+          setIsModalOpen(true);
+        }}
+        className="fixed bottom-6 right-6..."
+      >
+        <Plus className="h-7 w-7 sm:h-8 sm:w-8" />
+      </button>
+      
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-6">
@@ -406,7 +561,7 @@ export default function App() {
             </div>
             
             <div className="p-5 sm:p-6 overflow-y-auto">
-              <form id="add-task-form" onSubmit={handleAddTask} className="space-y-5">
+              <form id="add-task-form" onSubmit={handleSaveTask} className="space-y-5">
                 <div>
                   <label htmlFor="title" className="block text-sm font-medium text-slate-700 mb-1.5">Task Title *</label>
                   <input
